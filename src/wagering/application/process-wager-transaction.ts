@@ -1,6 +1,7 @@
 import { EntityManager } from '@mikro-orm/postgresql';
 import { v7 as uuidv7 } from 'uuid';
-import { InsufficientBalanceError, IdempotencyConflictError, WalletNotFoundError } from '../../shared/domain/errors/domain-error.js';
+import { executeInTransaction } from '../../database/execute-in-transaction.js';
+import { CurrencyMismatchError, InsufficientBalanceError, IdempotencyConflictError, WalletNotFoundError } from '../../shared/domain/errors/domain-error.js';
 import { WagerTransactionProcessedEvent } from '../../shared/domain/events/wager-transaction-processed.event.js';
 import { WagerTransactionRejectedEvent } from '../../shared/domain/events/wager-transaction-rejected.event.js';
 import { WalletBalanceChangedEvent } from '../../shared/domain/events/wallet-balance-changed.event.js';
@@ -41,16 +42,16 @@ export class ProcessWagerTransaction {
 
     try {
       return await this.em.transactional(async (tx) => {
-        const connection = tx.getConnection();
+        const execute = (query: string, params: unknown[] = []) => executeInTransaction<any[]>(tx, query, params);
         // Lock this wallet before checking the idempotency key a second time.
         // This makes parallel retries on a hot wallet observe the first commit.
-        const [walletRow] = await connection.execute<any[]>(
+        const [walletRow] = await execute(
           'select id, player_id as "playerId", currency, balance::text, version, created_at as "createdAt", updated_at as "updatedAt" from wallet where id = ? for update',
           [input.walletId],
         );
         if (!walletRow) throw new WalletNotFoundError(input.walletId);
 
-        const [existing] = await connection.execute<any[]>(
+        const [existing] = await execute(
           'select id, payload_hash as "payloadHash", status, failure_code as "failureCode", resulting_balance::text as "resultingBalance", currency from wager_transaction where provider_id = ? and idempotency_key = ?',
           [input.providerId, input.idempotencyKey],
         );
@@ -70,11 +71,11 @@ export class ProcessWagerTransaction {
           balance: String(walletRow.balance), version: walletRow.version,
           createdAt: walletRow.createdAt, updatedAt: walletRow.updatedAt,
         });
-        if (wallet.playerId !== input.playerId) throw new Error('Wallet does not belong to the supplied player');
+        if (wallet.playerId !== input.playerId) wager.reject('PLAYER_WALLET_MISMATCH');
 
         const now = new Date();
         let ledger: WalletLedgerEntry | undefined;
-        if (wager.affectsBalance()) {
+        if (!wager.isTerminal() && wager.affectsBalance()) {
           const before = wallet.balance;
           try {
             if (wager.ledgerDirectionFor() === LedgerDirection.Debit) wallet.debit(money);
@@ -84,14 +85,14 @@ export class ProcessWagerTransaction {
               money, balanceBefore: before, balanceAfter: wallet.balance, walletVersion: wallet.version,
             });
           } catch (error) {
-            if (!(error instanceof InsufficientBalanceError)) throw error;
+            if (!(error instanceof InsufficientBalanceError) && !(error instanceof CurrencyMismatchError)) throw error;
             wager.reject(error.code);
           }
         }
         if (!wager.isTerminal()) wager.markProcessed();
 
         const state = wager.toState();
-        await connection.execute(
+        await execute(
           `insert into wager_transaction (id, provider_id, external_transaction_id, idempotency_key, payload_hash, wallet_id, player_id, round_id, game_id, kind, amount, currency, reference_external_transaction_id, status, failure_code, resulting_balance, processed_at, created_at, updated_at)
            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [state.id, state.providerId, state.externalTransactionId, state.idempotencyKey, state.payloadHash, state.walletId,
@@ -102,11 +103,11 @@ export class ProcessWagerTransaction {
 
         if (ledger) {
           const entry = ledger.toState();
-          await connection.execute(
+          await execute(
             `update wallet set balance = ?, version = ?, updated_at = ? where id = ?`,
             [wallet.balance.getAmount(), wallet.version, wallet.updatedAt, wallet.id],
           );
-          await connection.execute(
+          await execute(
             `insert into wallet_ledger_entry (id, wallet_id, transaction_id, direction, amount, currency, balance_before, balance_after, wallet_version, created_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [entry.id, entry.walletId, entry.transactionId, entry.direction, entry.money, entry.currency,
@@ -132,7 +133,7 @@ export class ProcessWagerTransaction {
           balanceBefore: ledger.balanceBefore.toJSON(), balanceAfter: ledger.balanceAfter.toJSON(), walletVersion: wallet.version,
         } }).toJSON());
         for (const event of events) {
-          await connection.execute(
+          await execute(
             'insert into outbox_message (id, event_id, event_type, aggregate_id, payload, occurred_at, attempts, created_at) values (?, ?, ?, ?, ?::jsonb, ?, 0, ?)',
             [uuidv7(), event.eventId, event.eventType, event.aggregateId, JSON.stringify(event), event.occurredAt, now],
           );

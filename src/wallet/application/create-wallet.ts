@@ -1,5 +1,6 @@
 import { EntityManager } from '@mikro-orm/postgresql';
 import { v7 as uuidv7 } from 'uuid';
+import { executeInTransaction } from '../../database/execute-in-transaction.js';
 import { DuplicateWalletError } from '../../shared/domain/errors/domain-error.js';
 import { WalletBalanceChangedEvent } from '../../shared/domain/events/wallet-balance-changed.event.js';
 import { WagerTransactionProcessedEvent } from '../../shared/domain/events/wager-transaction-processed.event.js';
@@ -31,8 +32,8 @@ export class CreateWallet {
 
     try {
       await this.em.transactional(async (tx) => {
-        const connection = tx.getConnection();
-        await connection.execute(
+        const execute = (query: string, params: unknown[] = []) => executeInTransaction<any[]>(tx, query, params);
+        await execute(
           'insert into wallet (id, player_id, currency, balance, version, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)',
           [state.id, state.playerId, state.currency, state.balance, state.version, state.createdAt, state.updatedAt],
         );
@@ -63,7 +64,7 @@ export class CreateWallet {
             walletVersion: wallet.version,
           }).toState();
 
-          await connection.execute(
+          await execute(
             `insert into wager_transaction (id, provider_id, external_transaction_id, idempotency_key, payload_hash, wallet_id, player_id, round_id, game_id, kind, amount, currency, status, resulting_balance, processed_at, created_at, updated_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [openingState.id, openingState.providerId, openingState.externalTransactionId, openingState.idempotencyKey,
@@ -71,7 +72,7 @@ export class CreateWallet {
               openingState.gameId, openingState.kind, openingState.money, openingState.currency,
               openingState.status, wallet.balance.getAmount(), new Date(), openingState.createdAt, openingState.updatedAt],
           );
-          await connection.execute(
+          await execute(
             `insert into wallet_ledger_entry (id, wallet_id, transaction_id, direction, amount, currency, balance_before, balance_after, wallet_version, created_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [ledger.id, ledger.walletId, ledger.transactionId, ledger.direction, ledger.money, ledger.currency,
@@ -94,7 +95,7 @@ export class CreateWallet {
             } }).toJSON(),
           ];
           for (const event of events) {
-            await connection.execute(
+          await execute(
               'insert into outbox_message (id, event_id, event_type, aggregate_id, payload, occurred_at, attempts, created_at) values (?, ?, ?, ?, ?::jsonb, ?, 0, ?)',
               [uuidv7(), event.eventId, event.eventType, event.aggregateId, JSON.stringify(event), event.occurredAt, new Date()],
             );
