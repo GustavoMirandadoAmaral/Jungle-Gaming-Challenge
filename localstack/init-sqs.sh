@@ -9,5 +9,9 @@ awslocal sqs create-queue \
   --queue-name wager-transactions.fifo \
   --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"false","RedrivePolicy":"{\"deadLetterTargetArn\":\"arn:aws:sqs:us-east-1:000000000000:wager-transactions-dlq.fifo\",\"maxReceiveCount\":\"5\"}"}'
 
+awslocal sqs create-queue \
+  --queue-name integration-events.fifo \
+  --attributes '{"FifoQueue":"true","ContentBasedDeduplication":"false"}'
+
 echo "SQS queues created successfully!"
 awslocal sqs list-queues

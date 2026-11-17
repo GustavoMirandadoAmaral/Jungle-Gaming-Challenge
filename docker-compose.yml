@@ -52,6 +52,7 @@ services:
       - SQS_REGION=us-east-1
       - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
       - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - SQS_OUTBOX_QUEUE_URL=http://localstack:4566/000000000000/integration-events.fifo
       - APP_PORT=3000
       - NODE_ENV=production
     ports:
@@ -79,6 +80,7 @@ services:
       - SQS_REGION=us-east-1
       - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
       - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - SQS_OUTBOX_QUEUE_URL=http://localstack:4566/000000000000/integration-events.fifo
       - APP_PORT=3000
       - NODE_ENV=production
     ports:
@@ -106,6 +108,7 @@ services:
       - SQS_REGION=us-east-1
       - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
       - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - SQS_OUTBOX_QUEUE_URL=http://localstack:4566/000000000000/integration-events.fifo
       - APP_PORT=3000
       - NODE_ENV=production
     ports:

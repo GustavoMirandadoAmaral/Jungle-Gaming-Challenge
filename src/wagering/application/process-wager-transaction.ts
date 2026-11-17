@@ -18,10 +18,18 @@ export interface ProcessWagerInput {
   playerId: string; walletId: string; roundId: string; gameId: string;
   kind: WagerTransactionKind; money: { amount: string; currency: string };
   referenceExternalTransactionId?: string; correlationId?: string;
+  inboxMessage?: { consumerName: string; messageId: string };
 }
 export interface ProcessWagerResult {
   transactionId: string; status: WagerTransactionStatus; balance: { amount: string; currency: string };
   idempotentReplay: boolean; failureCode?: string;
+}
+
+export class InboxMessageAlreadyProcessed extends Error {
+  constructor() {
+    super('SQS message is already recorded in the inbox');
+    this.name = 'InboxMessageAlreadyProcessed';
+  }
 }
 
 /**
@@ -38,11 +46,19 @@ export class ProcessWagerTransaction {
     if (input.kind === WagerTransactionKind.Refund || input.kind === WagerTransactionKind.Rollback) {
       throw new Error('REFUND and ROLLBACK require reference validation and are not enabled in this first slice');
     }
-    const wager = WagerTransaction.create({ ...input, money });
+    const { inboxMessage, ...wagerInput } = input;
+    const wager = WagerTransaction.create({ ...wagerInput, money });
 
     try {
       return await this.em.transactional(async (tx) => {
         const execute = (query: string, params: unknown[] = []) => executeInTransaction<any[]>(tx, query, params);
+        if (inboxMessage) {
+          const insertedInbox = await execute(
+            'insert into inbox_message (id, consumer_name, message_id, processed_at) values (?, ?, ?, now()) on conflict (consumer_name, message_id) do nothing returning id',
+            [uuidv7(), inboxMessage.consumerName, inboxMessage.messageId],
+          );
+          if (insertedInbox.length === 0) throw new InboxMessageAlreadyProcessed();
+        }
         // Lock this wallet before checking the idempotency key a second time.
         // This makes parallel retries on a hot wallet observe the first commit.
         const [walletRow] = await execute(

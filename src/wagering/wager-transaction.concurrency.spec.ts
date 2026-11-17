@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { v7 as uuidv7 } from 'uuid';
+import { waitForApps } from '../test-utils/wait-for-apps.js';
 
 const appUrls = [3001, 3002, 3003].map((port) => `http://localhost:${port}`);
 const providerId = 'concurrency-test-provider';
@@ -77,6 +78,7 @@ async function readLedger(walletId: string) {
 }
 
 test('50 identical concurrent submissions across 3 app instances create one debit', async () => {
+  await waitForApps(appUrls);
   const wallet = await createWallet('1000.00');
   const body = wagerBody(wallet, `same-${uuidv7()}`, '1.00');
   const key = `${providerId}:${body.externalTransactionId}`;
@@ -95,9 +97,10 @@ test('50 identical concurrent submissions across 3 app instances create one debi
   expect(finalWallet.version).toBe(2);
   const ledger = await readLedger(wallet.id);
   expect(ledger.items.filter((item) => item.direction === 'DEBIT')).toHaveLength(1);
-});
+}, 30_000);
 
 test('different concurrent bets cannot overspend the same wallet', async () => {
+  await waitForApps(appUrls);
   const wallet = await createWallet('1000.00');
   const bodyA = wagerBody(wallet, `race-a-${uuidv7()}`, '600.00');
   const bodyB = wagerBody(wallet, `race-b-${uuidv7()}`, '600.00');
@@ -116,4 +119,4 @@ test('different concurrent bets cannot overspend the same wallet', async () => {
   expect(finalWallet.version).toBe(2);
   const ledger = await readLedger(wallet.id);
   expect(ledger.items.filter((item) => item.direction === 'DEBIT')).toHaveLength(1);
-});
+}, 30_000);
