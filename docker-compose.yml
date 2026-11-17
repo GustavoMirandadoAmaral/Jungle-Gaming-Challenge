@@ -1,0 +1,128 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: jungle-postgres
+    environment:
+      POSTGRES_DB: jungle_gaming
+      POSTGRES_USER: jungle
+      POSTGRES_PASSWORD: jungle_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jungle-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jungle -d jungle_gaming"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: jungle-localstack
+    environment:
+      - SERVICES=sqs
+      - DEFAULT_REGION=us-east-1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./localstack/init-sqs.sh:/etc/localstack/init/ready.d/init-sqs.sh
+    networks:
+      - jungle-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jungle-app-1
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=jungle_gaming
+      - DATABASE_USER=jungle
+      - DATABASE_PASSWORD=jungle_secret
+      - SQS_ENDPOINT=http://localstack:4566
+      - SQS_REGION=us-east-1
+      - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
+      - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - APP_PORT=3000
+      - NODE_ENV=production
+    ports:
+      - "3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    networks:
+      - jungle-network
+
+  app-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jungle-app-2
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=jungle_gaming
+      - DATABASE_USER=jungle
+      - DATABASE_PASSWORD=jungle_secret
+      - SQS_ENDPOINT=http://localstack:4566
+      - SQS_REGION=us-east-1
+      - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
+      - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - APP_PORT=3000
+      - NODE_ENV=production
+    ports:
+      - "3002:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    networks:
+      - jungle-network
+
+  app-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jungle-app-3
+    environment:
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=jungle_gaming
+      - DATABASE_USER=jungle
+      - DATABASE_PASSWORD=jungle_secret
+      - SQS_ENDPOINT=http://localstack:4566
+      - SQS_REGION=us-east-1
+      - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
+      - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - APP_PORT=3000
+      - NODE_ENV=production
+    ports:
+      - "3003:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    networks:
+      - jungle-network
+
+networks:
+  jungle-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
