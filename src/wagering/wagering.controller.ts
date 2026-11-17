@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Controller, Headers, NotFoundException, Post, UnprocessableEntityException, Body, Res } from '@nestjs/common';
+import { BadRequestException, ConflictException, Controller, Headers, HttpCode, HttpStatus, NotFoundException, Post, UnprocessableEntityException, Body, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { DomainError, IdempotencyConflictError, WalletNotFoundError } from '../shared/domain/errors/domain-error.js';
 import { ProcessWagerTransaction } from './application/process-wager-transaction.js';
@@ -10,6 +10,7 @@ export class WageringController {
   constructor(private readonly processWager: ProcessWagerTransaction) {}
 
   @Post()
+  @HttpCode(HttpStatus.OK)
   async submit(
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Body() body: SubmitWagerDto,
