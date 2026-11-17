@@ -1,13 +1,26 @@
-import { BadRequestException, ConflictException, Controller, Headers, HttpCode, HttpStatus, NotFoundException, Post, UnprocessableEntityException, Body, Res } from '@nestjs/common';
+import { BadRequestException, ConflictException, Controller, Get, Headers, HttpCode, HttpStatus, NotFoundException, Post, UnprocessableEntityException, Body, Res, Param } from '@nestjs/common';
 import type { Response } from 'express';
-import { DomainError, IdempotencyConflictError, WalletNotFoundError } from '../shared/domain/errors/domain-error.js';
+import { DomainError, IdempotencyConflictError, TransactionNotFoundError, WalletNotFoundError } from '../shared/domain/errors/domain-error.js';
 import { ProcessWagerTransaction } from './application/process-wager-transaction.js';
+import { GetWagerTransaction } from './application/get-wager-transaction.js';
 import { SubmitWagerDto } from './api/submit-wager.dto.js';
 import { WagerTransactionStatus } from './domain/enums/wager-transaction-status.enum.js';
 
 @Controller('wagering/transactions')
 export class WageringController {
-  constructor(private readonly processWager: ProcessWagerTransaction) {}
+  constructor(private readonly processWager: ProcessWagerTransaction, private readonly getWager: GetWagerTransaction) {}
+
+  @Get(':transactionId')
+  async byId(@Param('transactionId') transactionId: string) {
+    try {
+      return await this.getWager.byId(transactionId);
+    } catch (error) {
+      if (error instanceof TransactionNotFoundError) {
+        throw new NotFoundException({ code: error.code, message: error.message });
+      }
+      throw error;
+    }
+  }
 
   @Post()
   @HttpCode(HttpStatus.OK)
@@ -30,6 +43,8 @@ export class WageringController {
       });
       if (result.status === WagerTransactionStatus.Rejected) {
         response.status(422);
+      } else if (result.status === WagerTransactionStatus.PendingReference) {
+        response.status(202);
       }
       return result;
     } catch (error) {

@@ -4,6 +4,7 @@ import { v7 as uuidv7 } from 'uuid';
 import mikroOrmConfig from '../mikro-orm.config.js';
 import { ProcessWagerTransaction, InboxMessageAlreadyProcessed } from '../wagering/application/process-wager-transaction.js';
 import { WagerTransactionKind } from '../wagering/domain/enums/wager-transaction-kind.enum.js';
+import { WagerTransactionStatus } from '../wagering/domain/enums/wager-transaction-status.enum.js';
 import { waitForApps } from '../test-utils/wait-for-apps.js';
 
 const appUrl = process.env.TEST_APP_URL ?? 'http://localhost:3001';
@@ -37,7 +38,7 @@ test('a redelivered SQS messageId is stopped by the persistent inbox', async () 
   try {
     const processWager = new ProcessWagerTransaction(orm.em.fork());
     const first = await processWager.execute(input);
-    expect(first.status).toBe('PROCESSED');
+    expect(first.status).toBe(WagerTransactionStatus.Processed);
     expect(first.balance).toEqual({ amount: '90.00', currency: 'BRL' });
 
     await expect(processWager.execute(input)).rejects.toBeInstanceOf(InboxMessageAlreadyProcessed);

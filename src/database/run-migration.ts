@@ -23,7 +23,7 @@ async function runMigration() {
         const executed = await migrator.up();
         console.log(`Executed ${executed.length} migration(s):`);
         for (const m of executed) {
-          console.log(`  - ${m.fileName}`);
+          console.log(`  - ${m.name}`);
         }
         break;
       }
@@ -31,7 +31,7 @@ async function runMigration() {
         const executed = await migrator.down();
         console.log(`Reverted ${executed.length} migration(s):`);
         for (const m of executed) {
-          console.log(`  - ${m.fileName}`);
+          console.log(`  - ${m.name}`);
         }
         break;
       }

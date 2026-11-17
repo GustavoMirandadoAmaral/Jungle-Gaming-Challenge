@@ -1,5 +1,5 @@
 import { v7 as uuidv7 } from 'uuid';
-import { MoneyProps } from '../../value-objects/money.js';
+import { MoneyProps } from '../value-objects/money.js';
 import { IntegrationEvent, IntegrationEventProps } from './integration-event.js';
 
 export interface WagerTransactionProcessedData {

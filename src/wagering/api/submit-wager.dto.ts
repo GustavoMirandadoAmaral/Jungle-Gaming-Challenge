@@ -31,8 +31,13 @@ export class SubmitWagerDto {
   @IsString() @MaxLength(200)
   gameId!: string;
 
-  // Reference operations are enabled after their validation rules are implemented.
-  @IsIn([WagerTransactionKind.Bet, WagerTransactionKind.Win, WagerTransactionKind.Loss])
+  @IsIn([
+    WagerTransactionKind.Bet,
+    WagerTransactionKind.Win,
+    WagerTransactionKind.Loss,
+    WagerTransactionKind.Refund,
+    WagerTransactionKind.Rollback,
+  ])
   kind!: WagerTransactionKind;
 
   @IsObject()

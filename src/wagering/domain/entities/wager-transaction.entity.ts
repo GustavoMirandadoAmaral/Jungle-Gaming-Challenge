@@ -250,13 +250,17 @@ export class WagerTransaction {
     return this._payloadHash === otherHash;
   }
 
-  ledgerDirectionFor(): LedgerDirection {
+  ledgerDirectionFor(reference?: WagerTransaction): LedgerDirection {
     switch (this._kind) {
       case WagerTransactionKind.Opening:
       case WagerTransactionKind.Win:
       case WagerTransactionKind.Refund:
-      case WagerTransactionKind.Rollback:
         return LedgerDirection.Credit;
+      case WagerTransactionKind.Rollback:
+        if (!reference) throw new DomainError('ROLLBACK direction requires a reference transaction');
+        if (reference.kind === WagerTransactionKind.Bet) return LedgerDirection.Credit;
+        if (reference.kind === WagerTransactionKind.Win || reference.kind === WagerTransactionKind.Refund) return LedgerDirection.Debit;
+        throw new DomainError(`Cannot rollback ${reference.kind}`);
       case WagerTransactionKind.Bet:
         return LedgerDirection.Debit;
       case WagerTransactionKind.Loss:

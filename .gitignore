@@ -30,3 +30,6 @@ coverage/
 # Temp
 tmp/
 temp/
+
+# Challenge instructions (local reference only)
+regras-do-desafio.md

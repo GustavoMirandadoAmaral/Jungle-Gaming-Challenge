@@ -5,6 +5,7 @@ import { persistenceEntities } from '../database/entities.js';
 import { CreateWallet } from './application/create-wallet.js';
 import { GetWallet } from './application/get-wallet.js';
 import { WalletController } from './wallet.controller.js';
+import { ReconcileWallet } from './application/reconcile-wallet.js';
 
 @Module({
   imports: [MikroOrmModule.forFeature(persistenceEntities)],
@@ -16,6 +17,10 @@ import { WalletController } from './wallet.controller.js';
   }, {
     provide: GetWallet,
     useFactory: (em: EntityManager) => new GetWallet(em),
+    inject: [EntityManager],
+  }, {
+    provide: ReconcileWallet,
+    useFactory: (em: EntityManager) => new ReconcileWallet(em),
     inject: [EntityManager],
   }],
   exports: [],

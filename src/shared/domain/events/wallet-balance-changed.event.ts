@@ -1,6 +1,6 @@
 import { v7 as uuidv7 } from 'uuid';
-import { LedgerDirection } from '../../../../wallet/domain/enums/ledger-direction.enum.js';
-import { MoneyProps } from '../../value-objects/money.js';
+import { LedgerDirection } from '../../../wallet/domain/enums/ledger-direction.enum.js';
+import { MoneyProps } from '../value-objects/money.js';
 import { IntegrationEvent, IntegrationEventProps } from './integration-event.js';
 
 export interface WalletBalanceChangedData {

@@ -25,7 +25,7 @@ test('permanently malformed SQS messages are moved to the configured DLQ', async
   }));
 
   const deadline = Date.now() + 20_000;
-  let deadLetterMessage: { MessageId?: string; ReceiptHandle?: string } | undefined;
+  let deadLetterMessage: { MessageId?: string; ReceiptHandle?: string; Body?: string } | undefined;
   while (Date.now() < deadline && !deadLetterMessage) {
     const response = await sqs.send(new ReceiveMessageCommand({
       QueueUrl: dlq,
