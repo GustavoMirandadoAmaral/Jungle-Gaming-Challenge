@@ -8,7 +8,7 @@ export class ReconcileWallet {
   async execute(walletId: string) {
     const rows = await this.em.getConnection().execute<any[]>(
       `select w.balance::text as "storedBalance", w.currency,
-              coalesce(sum(case when l.direction = 'CREDIT' then l.amount else -l.amount end), 0)::text as "calculatedBalance",
+              coalesce(sum(case when l.direction = 'CREDIT' then l.amount else -l.amount end), 0)::numeric(20, 2)::text as "calculatedBalance",
               count(l.id)::text as "checkedEntries"
        from wallet w left join wallet_ledger_entry l on l.wallet_id = w.id
        where w.id = ? group by w.id`,

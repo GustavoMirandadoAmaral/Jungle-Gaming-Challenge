@@ -1,6 +1,7 @@
 import { v7 as uuidv7 } from 'uuid';
 import {
   CurrencyMismatchError,
+  DomainError,
   InsufficientBalanceError,
 } from '../../../shared/domain/errors/domain-error.js';
 import { Money } from '../../../shared/domain/value-objects/money.js';
@@ -56,6 +57,9 @@ export class Wallet {
     if (initialBalance.currency !== currency) {
       throw new CurrencyMismatchError(currency, initialBalance.currency);
     }
+    if (initialBalance.isNegative()) {
+      throw new DomainError('Initial wallet balance cannot be negative');
+    }
 
     return new Wallet(
       uuidv7(),
@@ -82,6 +86,8 @@ export class Wallet {
 
   debit(amount: Money): void {
     this.assertSameCurrency(amount);
+    if (amount.isNegative()) throw new DomainError('Wallet debit amount cannot be negative');
+    if (amount.isZero()) return;
     const newBalance = this._balance.subtract(amount);
     if (newBalance.isNegative()) {
       throw new InsufficientBalanceError(
@@ -97,6 +103,8 @@ export class Wallet {
 
   credit(amount: Money): void {
     this.assertSameCurrency(amount);
+    if (amount.isNegative()) throw new DomainError('Wallet credit amount cannot be negative');
+    if (amount.isZero()) return;
     this._balance = this._balance.add(amount);
     this._version += 1;
     this._updatedAt = new Date();

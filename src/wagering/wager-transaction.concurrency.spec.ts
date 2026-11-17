@@ -120,3 +120,20 @@ test('different concurrent bets cannot overspend the same wallet', async () => {
   const ledger = await readLedger(wallet.id);
   expect(ledger.items.filter((item) => item.direction === 'DEBIT')).toHaveLength(1);
 }, 30_000);
+
+test('different wallets make progress concurrently across separate app instances', async () => {
+  await waitForApps(appUrls);
+  const [walletA, walletB] = await Promise.all([createWallet('100.00'), createWallet('100.00')]);
+  const bodyA = wagerBody(walletA, `parallel-wallet-a-${uuidv7()}`, '75.00');
+  const bodyB = wagerBody(walletB, `parallel-wallet-b-${uuidv7()}`, '60.00');
+
+  const [resultA, resultB] = await Promise.all([
+    submit(appUrls[0], `${providerId}:${bodyA.externalTransactionId}`, bodyA),
+    submit(appUrls[2], `${providerId}:${bodyB.externalTransactionId}`, bodyB),
+  ]);
+
+  expect(resultA.body.status).toBe('PROCESSED');
+  expect(resultB.body.status).toBe('PROCESSED');
+  expect((await readWallet(walletA.id)).balance.amount).toBe('25.00');
+  expect((await readWallet(walletB.id)).balance.amount).toBe('40.00');
+});

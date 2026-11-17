@@ -130,6 +130,10 @@ export class WagerTransaction {
       idempotencyKey,
     } = props;
 
+    if (!money.isPositive()) {
+      throw new DomainError('Wager transaction amount must be greater than zero');
+    }
+
     // Validate reference requirement
     if (KINDS_REQUIRING_REFERENCE.has(kind) && !referenceExternalTransactionId) {
       throw new DomainError(

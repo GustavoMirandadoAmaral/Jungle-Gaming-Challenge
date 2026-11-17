@@ -62,6 +62,10 @@ export class WalletLedgerEntry {
   static create(props: CreateLedgerEntryProps): WalletLedgerEntry {
     const { walletId, transactionId, direction, money, balanceBefore, balanceAfter, walletVersion } = props;
 
+    if (!money.isPositive()) throw new DomainError('Ledger entry amount must be greater than zero');
+    if (walletVersion < 1 || !Number.isInteger(walletVersion)) throw new DomainError('Ledger wallet version must be a positive integer');
+    if (balanceBefore.isNegative() || balanceAfter.isNegative()) throw new DomainError('Ledger balances cannot be negative');
+
     // Validate: balanceBefore ± money === balanceAfter
     let expectedAfter: Money;
     if (direction === LedgerDirection.Credit) {

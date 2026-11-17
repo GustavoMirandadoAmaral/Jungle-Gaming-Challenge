@@ -19,16 +19,12 @@ export class Money {
       throw new DomainError('Money amount must be a non-empty string');
     }
 
-    if (!currency || typeof currency !== 'string' || currency.length !== 3) {
+    if (!currency || typeof currency !== 'string' || !/^[A-Za-z]{3}$/.test(currency)) {
       throw new DomainError('Currency must be a 3-letter ISO-4217 code');
     }
 
-    if (/[eE]/.test(amount)) {
-      throw new DomainError('Scientific notation is not allowed for money amounts');
-    }
-
-    if (amount === 'Infinity' || amount === '-Infinity' || amount === 'NaN') {
-      throw new DomainError(`Invalid money amount: ${amount}`);
+    if (!/^(?:0|[1-9]\d{0,17})\.\d{2}$/.test(amount)) {
+      throw new DomainError('Money amount must be a non-negative decimal string with exactly 2 decimal places');
     }
 
     let decimal: Decimal;
@@ -42,10 +38,6 @@ export class Money {
       throw new DomainError(`Invalid money amount: ${amount}`);
     }
 
-    if (decimal.decimalPlaces() > 2) {
-      throw new DomainError('Money amount cannot have more than 2 decimal places');
-    }
-
     return new Money(decimal, currency.toUpperCase());
   }
 
@@ -54,6 +46,9 @@ export class Money {
   }
 
   private static fromDecimal(value: Decimal, currency: string): Money {
+    if (!value.isFinite() || value.decimalPlaces() > 2 || value.abs().gte('1000000000000000000')) {
+      throw new DomainError('Money arithmetic exceeded the supported numeric(20, 2) range');
+    }
     return new Money(value, currency);
   }
 

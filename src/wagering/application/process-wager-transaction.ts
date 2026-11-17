@@ -14,6 +14,7 @@ import { LedgerDirection } from '../../wallet/domain/enums/ledger-direction.enum
 import { WagerTransaction } from '../domain/entities/wager-transaction.entity.js';
 import { WagerTransactionKind } from '../domain/enums/wager-transaction-kind.enum.js';
 import { WagerTransactionStatus } from '../domain/enums/wager-transaction-status.enum.js';
+import { AppMetrics } from '../../observability/app-metrics.js';
 
 export interface ProcessWagerInput {
   providerId: string; externalTransactionId: string; idempotencyKey: string;
@@ -52,17 +53,19 @@ export class InboxMessageAlreadyProcessed extends Error {
  * The row lock is per wallet, so unrelated wallets can still make progress in parallel.
  */
 export class ProcessWagerTransaction {
-  constructor(private readonly em: EntityManager) {}
+  constructor(private readonly em: EntityManager, private readonly metrics: AppMetrics = new AppMetrics()) {}
 
   async execute(input: ProcessWagerInput): Promise<ProcessWagerResult> {
+    const startedAt = performance.now();
     const money = Money.from(input.money);
     if (!money.isPositive()) throw new Error('Transaction amount must be greater than zero');
     if (input.kind === WagerTransactionKind.Opening) throw new Error('OPENING is an internal transaction');
     const { inboxMessage, ...wagerInput } = input;
     const wager = WagerTransaction.create({ ...wagerInput, money });
+    let resolvedPendingStatuses: WagerTransactionStatus[] = [];
 
     try {
-      return await this.em.transactional(async (tx) => {
+      const result = await this.em.transactional(async (tx) => {
         const execute = <T = any[]>(query: string, params: unknown[] = []) => executeInTransaction<T>(tx, query, params);
         if (inboxMessage) {
           const insertedInbox = await execute(
@@ -206,16 +209,24 @@ export class ProcessWagerTransaction {
         }
 
         if (wager.status === WagerTransactionStatus.Processed) {
-          await this.resolvePendingForReference(execute, wallet, wager, now);
+          resolvedPendingStatuses = await this.resolvePendingForReference(execute, wallet, wager, now);
         }
 
         return { transactionId: wager.id, status: wager.status, balance: wallet.balance.toJSON(), idempotentReplay: false, failureCode: wager.failureCode };
       });
+      this.recordResult(result, startedAt);
+      for (const status of resolvedPendingStatuses) this.metrics.recordTransaction(status);
+      return result;
     } catch (error) {
+      if (error instanceof IdempotencyConflictError) this.metrics.recordIdempotencyConflict();
+      this.metrics.observeWagerDuration((performance.now() - startedAt) / 1000);
       // A duplicate key can race on different wallets. The database unique
       // constraint arbitrates; after rollback, load and compare the winner.
       const wrappedError = error as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } };
       const databaseError = wrappedError.cause ?? wrappedError;
+      if (['55P03', '40P01', '40001'].includes(databaseError.code ?? '')) {
+        this.metrics.recordLockConflict(databaseError.code!);
+      }
       if (databaseError.code === '23505' && databaseError.constraint === 'wager_reference_reversal_uq') {
         throw new ReferenceAlreadyReversedError(wager.referenceExternalTransactionId ?? 'unknown');
       }
@@ -225,12 +236,23 @@ export class ProcessWagerTransaction {
           [input.providerId, input.idempotencyKey],
         );
         if (existing[0]) {
-          if (existing[0].payloadHash !== wager.payloadHash) throw new IdempotencyConflictError(input.idempotencyKey);
-          return { transactionId: existing[0].id, status: existing[0].status, balance: { amount: String(existing[0].resultingBalance), currency: existing[0].currency }, idempotentReplay: true, failureCode: existing[0].failureCode ?? undefined };
+          if (existing[0].payloadHash !== wager.payloadHash) {
+            this.metrics.recordIdempotencyConflict();
+            throw new IdempotencyConflictError(input.idempotencyKey);
+          }
+          const replay = { transactionId: existing[0].id, status: existing[0].status, balance: { amount: String(existing[0].resultingBalance), currency: existing[0].currency }, idempotentReplay: true, failureCode: existing[0].failureCode ?? undefined };
+          this.recordResult(replay, startedAt);
+          return replay;
         }
       }
       throw error;
     }
+  }
+
+  private recordResult(result: ProcessWagerResult, startedAt: number): void {
+    if (result.idempotentReplay) this.metrics.recordIdempotencyReplay();
+    else this.metrics.recordTransaction(result.status);
+    this.metrics.observeWagerDuration((performance.now() - startedAt) / 1000);
   }
 
   private referenceFailure(wager: WagerTransaction, reference: ReferenceRow): string | undefined {
@@ -263,20 +285,20 @@ export class ProcessWagerTransaction {
 
   /** Rechecks a persisted pending reversal after a scheduled reference lookup. */
   async resolvePendingReference(referenceId: string): Promise<void> {
-    await this.em.transactional(async (tx) => {
+    const statuses = await this.em.transactional(async (tx): Promise<WagerTransactionStatus[]> => {
       const execute = <T = any[]>(query: string, params: unknown[] = []) => executeInTransaction<T>(tx, query, params);
       const [candidate] = await execute<any[]>(
         `select wallet_id as "walletId" from wager_transaction where id = ?`,
         [referenceId],
       );
-      if (!candidate) return;
+      if (!candidate) return [];
       const [walletRow] = await execute<any[]>(
         `select id, player_id as "playerId", currency, balance::text, version,
                 created_at as "createdAt", updated_at as "updatedAt"
          from wallet where id = ? for update`,
         [candidate.walletId],
       );
-      if (!walletRow) return;
+      if (!walletRow) return [];
       const [referenceRow] = await execute<any[]>(
         `select id, provider_id as "providerId", external_transaction_id as "externalTransactionId",
                 player_id as "playerId", wallet_id as "walletId", round_id as "roundId", game_id as "gameId",
@@ -285,7 +307,7 @@ export class ProcessWagerTransaction {
          from wager_transaction where id = ? for update`,
         [referenceId],
       );
-      if (!referenceRow) return;
+      if (!referenceRow) return [];
       const wallet = Wallet.rehydrate({
         id: walletRow.id, playerId: walletRow.playerId, currency: walletRow.currency,
         balance: String(walletRow.balance), version: walletRow.version,
@@ -300,8 +322,9 @@ export class ProcessWagerTransaction {
         payloadHash: referenceRow.payloadHash, createdAt: new Date(referenceRow.createdAt),
         updatedAt: new Date(referenceRow.updatedAt),
       });
-      await this.resolvePendingForReference(execute, wallet, reference, new Date());
+      return this.resolvePendingForReference(execute, wallet, reference, new Date());
     });
+    for (const status of statuses) this.metrics.recordTransaction(status);
   }
 
   private async resolvePendingForReference(
@@ -309,7 +332,7 @@ export class ProcessWagerTransaction {
     wallet: Wallet,
     referenceWager: WagerTransaction,
     now: Date,
-  ): Promise<void> {
+  ): Promise<WagerTransactionStatus[]> {
     const pendingRows = await execute<PendingWagerRow[]>(
       `select id, external_transaction_id as "externalTransactionId", provider_id as "providerId",
               player_id as "playerId", wallet_id as "walletId", round_id as "roundId", game_id as "gameId",
@@ -321,7 +344,7 @@ export class ProcessWagerTransaction {
        order by created_at, id for update`,
       [referenceWager.providerId, referenceWager.externalTransactionId],
     );
-    if (pendingRows.length === 0) return;
+    if (pendingRows.length === 0) return [];
 
     const reference: ReferenceRow = {
       id: referenceWager.id,
@@ -336,6 +359,7 @@ export class ProcessWagerTransaction {
       status: referenceWager.status,
     };
 
+    const resolvedStatuses: WagerTransactionStatus[] = [];
     for (const row of pendingRows) {
       const pending = WagerTransaction.rehydrate({
         ...row,
@@ -417,6 +441,8 @@ export class ProcessWagerTransaction {
           [uuidv7(), event.eventId, event.eventType, event.aggregateId, JSON.stringify(event), event.occurredAt, now],
         );
       }
+      resolvedStatuses.push(pending.status);
     }
+    return resolvedStatuses;
   }
 }

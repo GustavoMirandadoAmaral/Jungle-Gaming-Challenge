@@ -33,6 +33,10 @@ test('transaction queries, ledger reconciliation, and pending reference expiry u
     const wager = await wagerResponse.json() as { transactionId: string; status: string };
     expect(wager.status).toBe('PROCESSED');
 
+    const metricsResponse = await fetch(`${appUrls[1]}/metrics`);
+    expect(metricsResponse.status).toBe(200);
+    expect(await metricsResponse.text()).toMatch(/wager_transactions_total\{status="PROCESSED"\} [1-9]\d*/);
+
     const [byIdResponse, byExternalResponse] = await Promise.all([
       fetch(`${appUrls[2]}/wagering/transactions/${wager.transactionId}`),
       fetch(`${appUrls[0]}/providers/query-reconciliation-integration-test/wagering/transactions/${externalTransactionId}`),

@@ -8,6 +8,7 @@ import { Money } from '../../shared/domain/value-objects/money.js';
 import { WagerTransactionKind } from '../domain/enums/wager-transaction-kind.enum.js';
 import { WagerTransactionStatus } from '../domain/enums/wager-transaction-status.enum.js';
 import { ProcessWagerTransaction } from './process-wager-transaction.js';
+import { AppMetrics } from '../../observability/app-metrics.js';
 
 interface PendingReferenceRow {
   id: string; externalTransactionId: string; providerId: string; playerId: string; walletId: string;
@@ -18,6 +19,7 @@ interface PendingReferenceRow {
 interface DueReferenceResult {
   rejectedCount: number;
   referenceIds: string[];
+  retryCount: number;
 }
 
 @Injectable()
@@ -27,6 +29,7 @@ export class PendingReferenceExpirer {
   constructor(
     private readonly em: EntityManager,
     private readonly processWager: ProcessWagerTransaction,
+    private readonly metrics: AppMetrics,
   ) {}
 
   @Interval(Number(process.env.PENDING_REFERENCE_POLL_INTERVAL_MS) || 5000)
@@ -53,6 +56,7 @@ export class PendingReferenceExpirer {
         );
         const referenceIds: string[] = [];
         const rejected: PendingReferenceRow[] = [];
+        let retryCount = 0;
         const now = Date.now();
 
         for (const row of candidates) {
@@ -62,6 +66,7 @@ export class PendingReferenceExpirer {
             [row.providerId, row.referenceExternalTransactionId],
           );
           if (references[0]) {
+            retryCount += 1;
             referenceIds.push(references[0].id);
             const backoff = Math.min(baseBackoffMs * 2 ** Math.min(attempts - 1, 20), maxBackoffMs);
             await execute(
@@ -84,6 +89,7 @@ export class PendingReferenceExpirer {
           }
 
           const backoff = Math.min(baseBackoffMs * 2 ** Math.min(attempts - 1, 20), maxBackoffMs);
+          retryCount += 1;
           await execute(
             `update wager_transaction set pending_reference_attempts = ?,
                pending_reference_next_attempt_at = ? where id = ?`,
@@ -103,7 +109,7 @@ export class PendingReferenceExpirer {
             [uuidv7(), event.eventId, event.eventType, event.aggregateId, JSON.stringify(event), event.occurredAt],
           );
         }
-        return { rejectedCount: rejected.length, referenceIds };
+        return { rejectedCount: rejected.length, referenceIds, retryCount };
       });
 
       // The shared use case resolves pending rows under the wallet lock and
@@ -111,6 +117,8 @@ export class PendingReferenceExpirer {
       for (const referenceId of outcome.referenceIds) {
         await this.processWager.resolvePendingReference(referenceId);
       }
+      for (let attempt = 0; attempt < outcome.retryCount; attempt += 1) this.metrics.recordRetry('pending_reference');
+      for (let rejection = 0; rejection < outcome.rejectedCount; rejection += 1) this.metrics.recordTransaction('REJECTED');
       if (outcome.rejectedCount > 0) {
         console.log(JSON.stringify({ level: 'info', event: 'pending_references_rejected', count: outcome.rejectedCount }));
       }

@@ -6,6 +6,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { WageringModule } from './wagering/wagering.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { HealthModule } from './health/health.module';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { HealthModule } from './health/health.module';
     WageringModule,
     MessagingModule,
     HealthModule,
+    ObservabilityModule,
   ],
 })
 export class AppModule {}

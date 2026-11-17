@@ -5,10 +5,15 @@ import { ProcessWagerTransaction } from './application/process-wager-transaction
 import { GetWagerTransaction } from './application/get-wager-transaction.js';
 import { SubmitWagerDto } from './api/submit-wager.dto.js';
 import { WagerTransactionStatus } from './domain/enums/wager-transaction-status.enum.js';
+import { ProviderIdentityPort } from './application/provider-identity.port.js';
 
 @Controller('wagering/transactions')
 export class WageringController {
-  constructor(private readonly processWager: ProcessWagerTransaction, private readonly getWager: GetWagerTransaction) {}
+  constructor(
+    private readonly processWager: ProcessWagerTransaction,
+    private readonly getWager: GetWagerTransaction,
+    private readonly providerIdentity: ProviderIdentityPort,
+  ) {}
 
   @Get(':transactionId')
   async byId(@Param('transactionId') transactionId: string) {
@@ -37,6 +42,7 @@ export class WageringController {
     }
 
     try {
+      await this.providerIdentity.authorize(body.providerId);
       const result = await this.processWager.execute({
         ...body,
         idempotencyKey,

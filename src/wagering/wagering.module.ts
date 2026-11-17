@@ -7,18 +7,24 @@ import { WageringController } from './wagering.controller.js';
 import { PendingReferenceExpirer } from './application/pending-reference-expirer.js';
 import { GetWagerTransaction } from './application/get-wager-transaction.js';
 import { ProviderWageringController } from './provider-wagering.controller.js';
+import { AppMetrics } from '../observability/app-metrics.js';
+import { ProviderIdentityPort } from './application/provider-identity.port.js';
+import { NoopProviderIdentity } from './application/noop-provider-identity.js';
 
 @Module({
   imports: [MikroOrmModule.forFeature(persistenceEntities)],
   controllers: [WageringController, ProviderWageringController],
   providers: [{
+    provide: ProviderIdentityPort,
+    useClass: NoopProviderIdentity,
+  }, {
     provide: ProcessWagerTransaction,
-    useFactory: (em: EntityManager) => new ProcessWagerTransaction(em),
-    inject: [EntityManager],
+    useFactory: (em: EntityManager, metrics: AppMetrics) => new ProcessWagerTransaction(em, metrics),
+    inject: [EntityManager, AppMetrics],
   }, {
     provide: PendingReferenceExpirer,
-    useFactory: (em: EntityManager, processWager: ProcessWagerTransaction) => new PendingReferenceExpirer(em, processWager),
-    inject: [EntityManager, ProcessWagerTransaction],
+    useFactory: (em: EntityManager, processWager: ProcessWagerTransaction, metrics: AppMetrics) => new PendingReferenceExpirer(em, processWager, metrics),
+    inject: [EntityManager, ProcessWagerTransaction, AppMetrics],
   }, {
     provide: GetWagerTransaction,
     useFactory: (em: EntityManager) => new GetWagerTransaction(em),

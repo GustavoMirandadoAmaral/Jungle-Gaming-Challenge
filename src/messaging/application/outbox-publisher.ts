@@ -3,12 +3,17 @@ import { Interval } from '@nestjs/schedule';
 import { EntityManager } from '@mikro-orm/postgresql';
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { executeInTransaction } from '../../database/execute-in-transaction.js';
+import { AppMetrics } from '../../observability/app-metrics.js';
 
 interface ClaimedOutboxMessage {
   id: string;
   eventId: string;
   eventType: string;
   aggregateId: string;
+  correlationId?: string;
+  transactionId?: string;
+  walletId?: string;
+  providerId?: string;
   payload: unknown;
   attempts: number;
 }
@@ -22,7 +27,7 @@ export class OutboxPublisher {
   private running = false;
   private readonly queueUrl = process.env.SQS_OUTBOX_QUEUE_URL;
 
-  constructor(private readonly em: EntityManager, private readonly sqs: SQSClient) {}
+  constructor(private readonly em: EntityManager, private readonly sqs: SQSClient, private readonly metrics: AppMetrics) {}
 
   @Interval(Number(process.env.OUTBOX_POLL_INTERVAL_MS) || 1000)
   async publishPending(): Promise<void> {
@@ -30,6 +35,7 @@ export class OutboxPublisher {
     this.running = true;
     try {
       const batchSize = Math.min(Math.max(Number(process.env.OUTBOX_BATCH_SIZE) || 10, 1), 100);
+      await this.refreshLag();
       const claimed = await this.claim(batchSize);
       for (const message of claimed) await this.publishOne(message);
     } catch (error) {
@@ -37,6 +43,14 @@ export class OutboxPublisher {
     } finally {
       this.running = false;
     }
+  }
+
+  private async refreshLag(): Promise<void> {
+    const rows = await this.em.getConnection().execute<any[]>(
+      `select coalesce(extract(epoch from (now() - min(created_at))), 0)::float8 as seconds
+       from outbox_message where published_at is null`,
+    );
+    this.metrics.setOutboxLag(Number(rows[0]?.seconds ?? 0));
   }
 
   private async claim(batchSize: number): Promise<ClaimedOutboxMessage[]> {
@@ -60,7 +74,11 @@ export class OutboxPublisher {
        from candidates
        where outbox.id = candidates.id
        returning outbox.id, outbox.event_id as "eventId", outbox.event_type as "eventType",
-                 outbox.aggregate_id as "aggregateId", outbox.payload, outbox.attempts`,
+                 outbox.aggregate_id as "aggregateId", outbox.payload, outbox.attempts,
+                 outbox.payload->>'correlationId' as "correlationId",
+                 outbox.payload->'data'->>'transactionId' as "transactionId",
+                 outbox.payload->'data'->>'walletId' as "walletId",
+                 outbox.payload->'data'->>'providerId' as "providerId"`,
       [batchSize, LEASE_SECONDS],
     ));
   }
@@ -80,8 +98,9 @@ export class OutboxPublisher {
         'update outbox_message set published_at = now(), locked_until = null where id = ? and published_at is null',
         [message.id],
       ));
-      console.log(JSON.stringify({ level: 'info', event: 'outbox_published', eventId: message.eventId, eventType: message.eventType, aggregateId: message.aggregateId }));
+      console.log(JSON.stringify({ level: 'info', event: 'outbox_published', eventId: message.eventId, eventType: message.eventType, aggregateId: message.aggregateId, correlationId: message.correlationId, transactionId: message.transactionId, walletId: message.walletId, providerId: message.providerId }));
     } catch (error) {
+      this.metrics.recordRetry('outbox');
       const backoffMs = Math.min(1000 * (2 ** Math.max(message.attempts - 1, 0)), MAX_BACKOFF_MS);
       await this.em.transactional((tx) => executeInTransaction(
         tx,
@@ -90,7 +109,7 @@ export class OutboxPublisher {
          where id = ? and published_at is null`,
         [backoffMs, message.id],
       ));
-      console.error(JSON.stringify({ level: 'error', event: 'outbox_publish_failed', eventId: message.eventId, eventType: message.eventType, aggregateId: message.aggregateId, error: this.errorMessage(error) }));
+      console.error(JSON.stringify({ level: 'error', event: 'outbox_publish_failed', eventId: message.eventId, eventType: message.eventType, aggregateId: message.aggregateId, correlationId: message.correlationId, transactionId: message.transactionId, walletId: message.walletId, providerId: message.providerId, error: this.errorMessage(error) }));
     }
   }
 
