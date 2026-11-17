@@ -27,11 +27,20 @@ interface SqsWagerEnvelope {
 export class WagerSqsConsumer implements OnModuleDestroy {
   private stopping = false;
   private polling = false;
-  private readonly queueUrl = process.env.SQS_WAGER_QUEUE_URL;
-  private readonly dlqUrl = process.env.SQS_WAGER_DLQ_URL;
+  private readonly queueUrl?: string;
+  private readonly dlqUrl?: string;
   private lastDlqSampleAt = 0;
 
-  constructor(private readonly sqs: SQSClient, private readonly processWager: ProcessWagerTransaction, private readonly metrics: AppMetrics) {}
+  constructor(
+    private readonly sqs: SQSClient,
+    private readonly processWager: ProcessWagerTransaction,
+    private readonly metrics: AppMetrics,
+    queueUrl = process.env.SQS_WAGER_QUEUE_URL,
+    dlqUrl = process.env.SQS_WAGER_DLQ_URL,
+  ) {
+    this.queueUrl = queueUrl;
+    this.dlqUrl = dlqUrl;
+  }
 
   @Interval(500)
   async poll(): Promise<void> {

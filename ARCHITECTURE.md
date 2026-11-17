@@ -48,5 +48,5 @@ Os eventos são gravados na outbox dentro da transação financeira e, portanto,
 ## Decisões e limitações conhecidas
 
 - Autenticação não foi implementada; ela não pontua no desafio. Os endpoints de provedor dependem de `ProviderIdentityPort`, hoje ligado ao adapter `NoopProviderIdentity`. Para produção, substitua esse adapter por validação OIDC em um IdP externo; não crie autenticação artesanal nem tabela local de senhas.
-- A cobertura atual inclui testes unitários de domínio, integrações reais com PostgreSQL/LocalStack e cenários de concorrência em três instâncias. Crash recovery após commit e antes do ack, reinício durante publicação e concorrência entre publishers merecem cenários dedicados adicionais.
+- A cobertura atual inclui testes unitários de domínio, integrações reais com PostgreSQL/LocalStack e cenários de concorrência em três instâncias. Há cenários dedicados para redelivery após falha do ack depois do commit e para reinício de uma instância preservando idempotência e ledger. Reinício durante publicação ainda merece um cenário de falha dedicado.
 - O `bun run lint` ainda apresenta diagnósticos de estilo/tipagem no repositório; isso não altera o resultado de `bunx tsc --noEmit` nem dos testes executados.
