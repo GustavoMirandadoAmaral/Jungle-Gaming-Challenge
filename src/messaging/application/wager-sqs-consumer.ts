@@ -29,6 +29,7 @@ export class WagerSqsConsumer implements OnModuleDestroy {
   private polling = false;
   private readonly queueUrl?: string;
   private readonly dlqUrl?: string;
+  private readonly visibilityTimeoutSeconds: number;
   private lastDlqSampleAt = 0;
 
   constructor(
@@ -37,9 +38,11 @@ export class WagerSqsConsumer implements OnModuleDestroy {
     private readonly metrics: AppMetrics,
     queueUrl = process.env.SQS_WAGER_QUEUE_URL,
     dlqUrl = process.env.SQS_WAGER_DLQ_URL,
+    visibilityTimeoutSeconds = Number(process.env.SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS) || 30,
   ) {
     this.queueUrl = queueUrl;
     this.dlqUrl = dlqUrl;
+    this.visibilityTimeoutSeconds = visibilityTimeoutSeconds;
   }
 
   @Interval(500)
@@ -51,7 +54,7 @@ export class WagerSqsConsumer implements OnModuleDestroy {
         QueueUrl: this.queueUrl,
         MaxNumberOfMessages: 10,
         WaitTimeSeconds: 10,
-        VisibilityTimeout: 30,
+        VisibilityTimeout: this.visibilityTimeoutSeconds,
         MessageSystemAttributeNames: ['ApproximateReceiveCount'],
       }));
       await this.refreshDlqGauge();

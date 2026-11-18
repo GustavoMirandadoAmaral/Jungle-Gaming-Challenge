@@ -63,7 +63,7 @@ bun run test:integration
 bun run test:concurrency
 ```
 
-O teste de concorrência envia a mesma aposta 50 vezes entre as três instâncias e verifica disputa real pelo saldo. Os testes de integração exercitam inbox/redelivery, outbox/SQS, DLQ, referências, consultas e reconciliação.
+O teste de concorrência envia a mesma aposta 50 vezes entre as três instâncias e verifica disputa real pelo saldo. Os testes de integração exercitam migrations e constraints do PostgreSQL, dois publishers concorrentes, retomada da outbox após morte do publisher, inbox/redelivery após morte do worker, desligamento gracioso por `SIGTERM`, DLQ, referências, consultas e reconciliação. O timeout de visibilidade do consumer é configurável por `SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS` e usa 30 segundos por padrão.
 
 Outros comandos:
 

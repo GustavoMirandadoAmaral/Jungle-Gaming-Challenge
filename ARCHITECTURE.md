@@ -35,7 +35,7 @@ Se a referência ainda não existe, a operação fica persistida como `PENDING_R
 
 ## Inbox, SQS e ack
 
-O consumidor SQS usa `ProcessWagerTransaction`, igual à API HTTP. `(consumer_name, message_id)` tem constraint única em uma inbox persistente. A inbox e os efeitos financeiros confirmam juntos; a mensagem só recebe `DeleteMessage` depois do commit. Redelivery após o commit encontra a inbox e não repete o débito/crédito. Falhas transitórias recebem visibilidade crescente; mensagens malformadas seguem a política de redrive da fila FIFO e vão para a DLQ após o limite configurado.
+O consumidor SQS usa `ProcessWagerTransaction`, igual à API HTTP. `(consumer_name, message_id)` tem constraint única em uma inbox persistente. A inbox e os efeitos financeiros confirmam juntos; a mensagem só recebe `DeleteMessage` depois do commit. Redelivery após o commit encontra a inbox e não repete o débito/crédito. Falhas transitórias recebem visibilidade crescente; mensagens malformadas seguem a política de redrive da fila FIFO e vão para a DLQ após o limite configurado. Em `SIGTERM`, o hook de desligamento impede novos polls e aguarda o poll atual, incluindo processamento e ack, terminar.
 
 ## Outbox e publicação
 
@@ -48,5 +48,5 @@ Os eventos são gravados na outbox dentro da transação financeira e, portanto,
 ## Decisões e limitações conhecidas
 
 - Autenticação não foi implementada; ela não pontua no desafio. Os endpoints de provedor dependem de `ProviderIdentityPort`, hoje ligado ao adapter `NoopProviderIdentity`. Para produção, substitua esse adapter por validação OIDC em um IdP externo; não crie autenticação artesanal nem tabela local de senhas.
-- A cobertura atual inclui testes unitários de domínio, integrações reais com PostgreSQL/LocalStack e cenários de concorrência em três instâncias. Há cenários dedicados para redelivery após falha do ack depois do commit, reinício de uma instância preservando idempotência e ledger, e encerramento do publisher após reivindicar um evento confirmado, seguido da retomada por outra instância após o lease.
+- A cobertura atual inclui testes unitários de domínio, integrações reais com PostgreSQL/LocalStack e cenários de concorrência em três instâncias. Há cenários dedicados para constraints do schema, publishers concorrentes, morte do consumer após o commit e antes do ack, desligamento por `SIGTERM`, reinício de uma instância preservando idempotência e ledger, e encerramento do publisher após reivindicar um evento confirmado, seguido da retomada por outra instância após o lease.
 - O `bun run lint` ainda apresenta diagnósticos de estilo/tipagem no repositório; isso não altera o resultado de `bunx tsc --noEmit` nem dos testes executados.

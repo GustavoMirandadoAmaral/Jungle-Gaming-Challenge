@@ -25,9 +25,16 @@ const MAX_BACKOFF_MS = 5 * 60 * 1000;
 @Injectable()
 export class OutboxPublisher {
   private running = false;
-  private readonly queueUrl = process.env.SQS_OUTBOX_QUEUE_URL;
+  private readonly queueUrl?: string;
 
-  constructor(private readonly em: EntityManager, private readonly sqs: SQSClient, private readonly metrics: AppMetrics) {}
+  constructor(
+    private readonly em: EntityManager,
+    private readonly sqs: SQSClient,
+    private readonly metrics: AppMetrics,
+    queueUrl = process.env.SQS_OUTBOX_QUEUE_URL,
+  ) {
+    this.queueUrl = queueUrl;
+  }
 
   @Interval(Number(process.env.OUTBOX_POLL_INTERVAL_MS) || 1000)
   async publishPending(): Promise<void> {
