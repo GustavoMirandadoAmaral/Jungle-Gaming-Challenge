@@ -80,3 +80,13 @@ test('processed wager transactions are terminal', () => {
   expect(wager.isTerminal()).toBe(true);
   expect(() => wager.reject('LATE_REJECTION')).toThrow(DomainError);
 });
+
+test('failed wager transactions are terminal and retain an auditable failure code', () => {
+  const wager = create(WagerTransactionKind.Bet);
+  wager.fail('PERMANENT_INFRASTRUCTURE_FAILURE');
+
+  expect(wager.status).toBe(WagerTransactionStatus.Failed);
+  expect(wager.failureCode).toBe('PERMANENT_INFRASTRUCTURE_FAILURE');
+  expect(wager.isTerminal()).toBe(true);
+  expect(() => wager.markProcessed()).toThrow(DomainError);
+});

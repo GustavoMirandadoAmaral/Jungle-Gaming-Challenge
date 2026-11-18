@@ -25,6 +25,7 @@ services:
       - SERVICES=sqs
       - DEFAULT_REGION=us-east-1
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
+      - SQS_WAGER_MAX_RECEIVE_COUNT=${SQS_WAGER_MAX_RECEIVE_COUNT:-5}
     ports:
       - "4566:4566"
     volumes:
@@ -52,6 +53,7 @@ services:
       - SQS_REGION=us-east-1
       - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
       - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - SQS_WAGER_MAX_RECEIVE_COUNT=${SQS_WAGER_MAX_RECEIVE_COUNT:-5}
       - SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS=${SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS:-30}
       - SQS_OUTBOX_QUEUE_URL=http://localstack:4566/000000000000/integration-events.fifo
       - APP_PORT=3000
@@ -88,6 +90,7 @@ services:
       - SQS_REGION=us-east-1
       - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
       - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - SQS_WAGER_MAX_RECEIVE_COUNT=${SQS_WAGER_MAX_RECEIVE_COUNT:-5}
       - SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS=${SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS:-30}
       - SQS_OUTBOX_QUEUE_URL=http://localstack:4566/000000000000/integration-events.fifo
       - APP_PORT=3000
@@ -124,6 +127,7 @@ services:
       - SQS_REGION=us-east-1
       - SQS_WAGER_QUEUE_URL=http://localstack:4566/000000000000/wager-transactions.fifo
       - SQS_WAGER_DLQ_URL=http://localstack:4566/000000000000/wager-transactions-dlq.fifo
+      - SQS_WAGER_MAX_RECEIVE_COUNT=${SQS_WAGER_MAX_RECEIVE_COUNT:-5}
       - SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS=${SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS:-30}
       - SQS_OUTBOX_QUEUE_URL=http://localstack:4566/000000000000/integration-events.fifo
       - APP_PORT=3000

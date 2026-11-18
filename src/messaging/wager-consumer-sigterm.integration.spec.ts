@@ -133,7 +133,17 @@ test('SIGTERM lets an in-flight SQS wager commit and ack before the consumer exi
     await lockTransaction;
     lockTransaction = undefined;
 
-    const exited = docker(['wait', workerContainerId!,], 20_000);
+    const exited = docker(['wait', workerContainerId!,], 35_000);
+    if (exited.status !== 0) {
+      const workerLogs = docker(['logs', workerContainerId!]);
+      const workerState = docker(['inspect', '--format', '{{json .State}}', workerContainerId!]);
+      console.error(JSON.stringify({
+        event: 'sigterm_worker_exit_timeout',
+        waitError: exited.error?.message,
+        workerState: workerState.stdout,
+        workerLogs: workerLogs.stdout,
+      }));
+    }
     expect(exited.status).toBe(0);
     expect(exited.stdout.trim()).toBe('0');
 
@@ -172,4 +182,4 @@ test('SIGTERM lets an in-flight SQS wager commit and ack before the consumer exi
     await orm.close(true);
     await sqs.destroy();
   }
-}, 60_000);
+}, 80_000);

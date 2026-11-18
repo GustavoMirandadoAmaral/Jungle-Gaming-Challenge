@@ -56,14 +56,14 @@ Os testes unitários não precisam de serviços externos:
 bun run test:unit
 ```
 
-Os testes de integração e concorrência usam PostgreSQL, LocalStack e as três APIs reais. Mantenha o Compose em execução e as migrations aplicadas:
+Os testes de integração e concorrência usam PostgreSQL, LocalStack e as três APIs reais. Mantenha o Compose em execução e as migrations aplicadas. A suíte de integração roda os arquivos em sequência porque alguns cenários param e reiniciam containers compartilhados:
 
 ```powershell
 bun run test:integration
 bun run test:concurrency
 ```
 
-O teste de concorrência envia a mesma aposta 50 vezes entre as três instâncias e verifica disputa real pelo saldo. Os testes de integração exercitam migrations e constraints do PostgreSQL, dois publishers concorrentes, retomada da outbox após morte do publisher, inbox/redelivery após morte do worker, desligamento gracioso por `SIGTERM`, DLQ, referências, consultas e reconciliação. O timeout de visibilidade do consumer é configurável por `SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS` e usa 30 segundos por padrão.
+O teste de concorrência envia a mesma aposta 50 vezes entre as três instâncias e verifica disputa real pelo saldo. Os testes de integração exercitam migrations e constraints do PostgreSQL, rollback atômico quando a inserção da outbox falha, persistência de `FAILED` após esgotar tentativas com encaminhamento à DLQ, dois publishers concorrentes, retomada da outbox após morte do publisher, inbox/redelivery após morte do worker, desligamento gracioso por `SIGTERM`, referências, consultas e reconciliação. O timeout de visibilidade do consumer é configurável por `SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS` e usa 30 segundos por padrão. O limite de recebimentos antes do redrive é `SQS_WAGER_MAX_RECEIVE_COUNT` e usa 5 por padrão.
 
 Outros comandos:
 

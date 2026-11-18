@@ -8,11 +8,14 @@ import {
   SQSClient,
 } from '@aws-sdk/client-sqs';
 import { DomainError } from '../../shared/domain/errors/domain-error.js';
+import { FailureCode } from '../../shared/domain/errors/failure-codes.js';
 import { ProcessWagerInput, ProcessWagerTransaction, InboxMessageAlreadyProcessed } from '../../wagering/application/process-wager-transaction.js';
+import { WagerTransactionStatus } from '../../wagering/domain/enums/wager-transaction-status.enum.js';
 import { AppMetrics } from '../../observability/app-metrics.js';
 
 const CONSUMER_NAME = 'wager-transaction-consumer-v1';
 const MAX_RETRY_VISIBILITY_SECONDS = 300;
+const DEFAULT_MAX_RECEIVE_COUNT = 5;
 
 class PermanentSqsMessageError extends Error {}
 
@@ -30,6 +33,7 @@ export class WagerSqsConsumer implements OnModuleDestroy {
   private readonly queueUrl?: string;
   private readonly dlqUrl?: string;
   private readonly visibilityTimeoutSeconds: number;
+  private readonly maxReceiveCount: number;
   private lastDlqSampleAt = 0;
 
   constructor(
@@ -39,10 +43,12 @@ export class WagerSqsConsumer implements OnModuleDestroy {
     queueUrl = process.env.SQS_WAGER_QUEUE_URL,
     dlqUrl = process.env.SQS_WAGER_DLQ_URL,
     visibilityTimeoutSeconds = Number(process.env.SQS_WAGER_VISIBILITY_TIMEOUT_SECONDS) || 30,
+    maxReceiveCount = Number(process.env.SQS_WAGER_MAX_RECEIVE_COUNT) || DEFAULT_MAX_RECEIVE_COUNT,
   ) {
     this.queueUrl = queueUrl;
     this.dlqUrl = dlqUrl;
     this.visibilityTimeoutSeconds = visibilityTimeoutSeconds;
+    this.maxReceiveCount = Math.max(1, Math.floor(maxReceiveCount));
   }
 
   @Interval(500)
@@ -82,8 +88,8 @@ export class WagerSqsConsumer implements OnModuleDestroy {
     let providerId: string | undefined;
     let walletId: string | undefined;
     let transactionId: string | undefined;
+    let envelope: SqsWagerEnvelope | undefined;
     try {
-      let envelope: SqsWagerEnvelope;
       try {
         envelope = JSON.parse(message.Body) as SqsWagerEnvelope;
       } catch {
@@ -101,6 +107,13 @@ export class WagerSqsConsumer implements OnModuleDestroy {
         inboxMessage: { consumerName: CONSUMER_NAME, messageId: message.MessageId },
       });
       transactionId = result.transactionId;
+      if (result.status === WagerTransactionStatus.Failed) {
+        // Preserve the queue's native redrive behavior after the failed state
+        // has been durably recorded in PostgreSQL.
+        await this.deferForRedrive(message, true);
+        console.error(JSON.stringify({ level: 'error', event: 'sqs_wager_failed_and_sent_to_redrive', messageId: message.MessageId, correlationId, transactionId, walletId, providerId, failureCode: result.failureCode }));
+        return;
+      }
       // execute() returns only after the wallet, ledger, transaction, outbox and inbox commit.
       await this.sqs.send(new DeleteMessageCommand({ QueueUrl: this.queueUrl, ReceiptHandle: message.ReceiptHandle }));
       console.log(JSON.stringify({ level: 'info', event: 'sqs_wager_acknowledged', messageId: message.MessageId, correlationId, transactionId: result.transactionId, walletId, providerId, status: result.status }));
@@ -117,6 +130,29 @@ export class WagerSqsConsumer implements OnModuleDestroy {
         await this.sqs.send(new DeleteMessageCommand({ QueueUrl: this.queueUrl, ReceiptHandle: message.ReceiptHandle }));
         console.log(JSON.stringify({ level: 'info', event: 'sqs_wager_terminal_acknowledged', messageId: message.MessageId, correlationId, transactionId, walletId, providerId, reason: this.errorMessage(error) }));
         return;
+      }
+      const receiveCount = Math.max(1, Number(message.Attributes?.ApproximateReceiveCount) || 1);
+      if (receiveCount >= this.maxReceiveCount && envelope?.data) {
+        try {
+          const failed = await this.processWager.failPermanently(
+            envelope.data,
+            FailureCode.PERMANENT_INFRASTRUCTURE_FAILURE,
+          );
+          transactionId = failed.transactionId;
+          if (failed.status === WagerTransactionStatus.Failed) {
+            // The message stays unacknowledged. SQS moves it to the DLQ once
+            // this final visibility expires, while PostgreSQL keeps the audit.
+            await this.deferForRedrive(message, true);
+            console.error(JSON.stringify({ level: 'error', event: 'sqs_wager_permanent_failure_recorded', messageId: message.MessageId, correlationId, transactionId, walletId, providerId, failureCode: failed.failureCode }));
+            return;
+          }
+          // A concurrent instance may have committed the wager while this
+          // instance was retrying a transient error. Respect that outcome.
+          await this.sqs.send(new DeleteMessageCommand({ QueueUrl: this.queueUrl, ReceiptHandle: message.ReceiptHandle }));
+          return;
+        } catch (auditError) {
+          console.error(JSON.stringify({ level: 'error', event: 'sqs_wager_permanent_failure_audit_failed', messageId: message.MessageId, correlationId, transactionId, walletId, providerId, error: this.errorMessage(auditError) }));
+        }
       }
       this.metrics.recordRetry('sqs');
       await this.deferForRedrive(message, false);
@@ -158,6 +194,15 @@ export class WagerSqsConsumer implements OnModuleDestroy {
   }
 
   private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    if (!(error instanceof Error)) return 'UnknownError';
+    let current: unknown = error;
+    for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+      const details = current as { code?: unknown; cause?: unknown };
+      if (typeof details.code === 'string') return `${error.name} (${details.code})`;
+      current = details.cause;
+    }
+    // Driver messages may embed SQL and serialized financial event payloads.
+    // Keep logs useful without copying those values into application logs.
+    return error.name || 'Error';
   }
 }

@@ -55,6 +55,62 @@ export class InboxMessageAlreadyProcessed extends Error {
 export class ProcessWagerTransaction {
   constructor(private readonly em: EntityManager, private readonly metrics: AppMetrics = new AppMetrics()) {}
 
+  /** Persists an audit-only terminal state after all SQS delivery attempts fail. */
+  async failPermanently(input: ProcessWagerInput, failureCode: FailureCode): Promise<ProcessWagerResult> {
+    const startedAt = performance.now();
+    const money = Money.from(input.money);
+    if (!money.isPositive()) throw new Error('Transaction amount must be greater than zero');
+    if (input.kind === WagerTransactionKind.Opening) throw new Error('OPENING is an internal transaction');
+    const wager = WagerTransaction.create({ ...input, money });
+    wager.fail(failureCode);
+
+    const result = await this.em.transactional(async (tx) => {
+      const execute = <T = any[]>(query: string, params: unknown[] = []) => executeInTransaction<T>(tx, query, params);
+      const [walletRow] = await execute<any[]>(
+        'select id, player_id as "playerId", currency, balance::text from wallet where id = ? for update',
+        [input.walletId],
+      );
+      if (!walletRow) throw new WalletNotFoundError(input.walletId);
+
+      const [existing] = await execute<any[]>(
+        'select id, payload_hash as "payloadHash", status, failure_code as "failureCode", resulting_balance::text as "resultingBalance", currency from wager_transaction where provider_id = ? and idempotency_key = ?',
+        [input.providerId, input.idempotencyKey],
+      );
+      if (existing) {
+        if (existing.payloadHash !== wager.payloadHash) throw new IdempotencyConflictError(input.idempotencyKey);
+        return {
+          transactionId: existing.id,
+          status: existing.status,
+          balance: { amount: String(existing.resultingBalance), currency: existing.currency },
+          idempotentReplay: true,
+          failureCode: existing.failureCode ?? undefined,
+        };
+      }
+
+      const state = wager.toState();
+      const now = new Date();
+      await execute(
+        `insert into wager_transaction (id, provider_id, external_transaction_id, idempotency_key, payload_hash, wallet_id, player_id, round_id, game_id, kind, amount, currency, reference_external_transaction_id, reference_transaction_id, status, failure_code, resulting_balance, processed_at, created_at, updated_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [state.id, state.providerId, state.externalTransactionId, state.idempotencyKey, state.payloadHash, state.walletId,
+          state.playerId, state.roundId, state.gameId, state.kind, state.money, state.currency,
+          state.referenceExternalTransactionId ?? null, state.referenceTransactionId ?? null, state.status,
+          state.failureCode ?? null, String(walletRow.balance), now, now, now],
+      );
+
+      return {
+        transactionId: state.id,
+        status: state.status,
+        balance: { amount: String(walletRow.balance), currency: walletRow.currency },
+        idempotentReplay: false,
+        failureCode: state.failureCode,
+      };
+    });
+
+    this.recordResult(result, startedAt);
+    return result;
+  }
+
   async execute(input: ProcessWagerInput): Promise<ProcessWagerResult> {
     const startedAt = performance.now();
     const money = Money.from(input.money);

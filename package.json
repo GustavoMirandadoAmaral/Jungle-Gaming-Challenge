@@ -8,7 +8,7 @@
     "build": "bun build src/main.ts --outdir dist --target bun",
     "test": "bun test",
     "test:unit": "bun test src/**/*.unit.spec.ts",
-    "test:integration": "bun test src/**/*.integration.spec.ts",
+    "test:integration": "bun run src/test-utils/run-integration-suite.ts",
     "test:concurrency": "bun test src/**/*.concurrency.spec.ts",
     "migration:create": "bun run src/database/run-migration.ts create",
     "migration:up": "bun run src/database/run-migration.ts up",
